@@ -17,8 +17,8 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 
-#define NUMFRAMES 500
-#define MATHFRAMES 500
+#define NUMFRAMES 100
+#define MATHFRAMES 100
 
 using namespace cv;
 using namespace std;
@@ -40,6 +40,8 @@ int kernel_size = 3;
 int edgeThresh = 1;
 int ratio = 3;
 Mat canny_frame, cdst, timg_gray, timg_grad;
+Mat gray;
+vector<Vec4i> lines;
 
 IplImage* frame;
 time_t startTime, endTime;
@@ -81,8 +83,6 @@ void CannyThreshold(int, void*)
 
 void *cannyTransform(void *in)
 {
-    // time(&startTime);
-    // for(int i = 0; i < NUMFRAMES; i++)
     while(1)
     {
         struct timespec start, end;
@@ -106,24 +106,56 @@ void *cannyTransform(void *in)
         exec.t2 = start;
         newVal = true;
         pthread_mutex_unlock(&lock); 
-        
-        // double time_spent = (end.tv_sec - start.tv_sec) +
-		// 				(end.tv_nsec - start.tv_nsec) / BILLION;
-
-        // double inverse = (double)1.00 / time_spent;
-        // // printf("From func: %lf\n", inverse);
-
-        // if(fps.size() < MATHFRAMES)
-        //     fps.push_back(inverse);
-        // else
-        // {
-        //     fps.erase(fps.begin());
-        //     fps.push_back(inverse);
-        // }
     }
     threadEnd = true;
-    // time(&endTime);
-    // break;
+}
+
+void *houghThread(void *in)
+{
+    while(1)
+    {
+        struct timespec start, end;
+
+        clock_gettime(CLOCK_REALTIME, &start);
+        frame=cvQueryFrame(capture);
+
+        Mat mat_frame(cvarrToMat(frame));
+        Canny(mat_frame, canny_frame, 50, 200, 3);
+
+        cvtColor(canny_frame, cdst, CV_GRAY2BGR);
+        cvtColor(mat_frame, gray, CV_BGR2GRAY);
+
+        HoughLinesP(canny_frame, lines, 1, CV_PI/180, 50, 50, 10);
+
+        for( size_t i = 0; i < lines.size(); i++ )
+        {
+          Vec4i l = lines[i];
+          line(mat_frame, Point(l[0], l[1]), Point(l[2], l[3]), Scalar(0,0,255), 3, CV_AA);
+        }
+
+     
+        if(!frame) break;
+
+        // cvShowImage seems to be a problem in 3.1
+        //cvShowImage("Capture Example", frame);
+
+        imshow("Capture Example", mat_frame);
+
+        char c = cvWaitKey(10);
+        if( c == 'q' ) break;
+        clock_gettime(CLOCK_REALTIME, &end);
+
+        pthread_mutex_lock(&lock); 
+        exec.t1 = end;
+        exec.t2 = start;
+        newVal = true;
+        pthread_mutex_unlock(&lock); 
+    }
+
+    threadEnd = true;
+    cvReleaseCapture(&capture);
+    cvDestroyWindow("Capture Example");
+
 }
 
 void *logThread(void *in)
@@ -150,9 +182,7 @@ void *logThread(void *in)
 						    (tempEnd.tv_nsec - tempStart.tv_nsec) / BILLION;
 
         double inverse = (double)1.00 / time_spent;
-        // printf("From func: %lf\n", inverse);
 
-        // pthread_mutex_lock(&lock1); 
         if(fps.size() < MATHFRAMES)
             fps.push_back(inverse);
         else
@@ -160,7 +190,6 @@ void *logThread(void *in)
             fps.erase(fps.begin());
             fps.push_back(inverse);
         }
-        // pthread_mutex_lock(&lock1); 
     }
 }
 
@@ -236,26 +265,13 @@ int main( int argc, char** argv )
     cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_WIDTH, HRES);
     cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_HEIGHT, VRES);
 
-    // while(1)
-    // {
-    // cannyTransform();
     printf("\n");
-    pthread_create(&thread, NULL, cannyTransform, NULL);
+    pthread_create(&thread, NULL, houghThread, NULL);
     pthread_create(&thread1, NULL, calcThread, NULL);
     pthread_create(&thread2, NULL, logThread, NULL);
     pthread_join(thread, NULL);
     pthread_join(thread1, NULL);
     pthread_join(thread2, NULL);
-    // }
-
-    // Time elapsed
-    // double seconds = difftime (endTime, startTime);
-    // cout << "Time taken : " << seconds << " seconds" << endl;
-    
-    // Calculate frames per second
-    // double fps;
-    // fps  = NUMFRAMES / seconds;
-    // cout << "Estimated frames per second : " << fps << endl;
 
     cvReleaseCapture(&capture);
     
