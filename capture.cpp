@@ -42,6 +42,7 @@ int ratio = 3;
 Mat canny_frame, cdst, timg_gray, timg_grad;
 Mat gray;
 vector<Vec4i> lines;
+vector<Vec3f> circles;
 
 IplImage* frame;
 time_t startTime, endTime;
@@ -158,6 +159,59 @@ void *houghThread(void *in)
 
 }
 
+void *houghEllipThread(void *in)
+{
+    while(1)
+    {
+        struct timespec start, end;
+
+        clock_gettime(CLOCK_REALTIME, &start);
+        frame=cvQueryFrame(capture);
+        if(!frame) break;
+
+        Mat mat_frame(cvarrToMat(frame));
+        
+        // Does not work in OpenCV 3.1
+        //cvtColor(mat_frame, gray, CV_BGR2GRAY);
+        cvtColor(mat_frame, gray, COLOR_BGR2GRAY);
+
+        GaussianBlur(gray, gray, Size(9,9), 2, 2);
+
+        HoughCircles(gray, circles, CV_HOUGH_GRADIENT, 1, gray.rows/8, 100, 50, 0, 0);
+
+        printf("circles.size = %ld\n", circles.size());
+
+        for( size_t i = 0; i < circles.size(); i++ )
+        {
+          Point center(cvRound(circles[i][0]), cvRound(circles[i][1]));
+          int radius = cvRound(circles[i][2]);
+          // circle center
+          circle( mat_frame, center, 3, Scalar(0,255,0), -1, 8, 0 );
+          // circle outline
+          circle( mat_frame, center, radius, Scalar(0,0,255), 3, 8, 0 );
+        }
+
+        // Does not work in OpenCV 3.1
+        //cvShowImage("Capture Example", frame);
+
+        imshow("Capture Example", mat_frame);
+
+        char c = cvWaitKey(10);
+        if( c == 'q' ) break;
+        clock_gettime(CLOCK_REALTIME, &end);
+
+        pthread_mutex_lock(&lock); 
+        exec.t1 = end;
+        exec.t2 = start;
+        newVal = true;
+        pthread_mutex_unlock(&lock); 
+    }
+
+    threadEnd = true;
+    cvReleaseCapture(&capture);
+    cvDestroyWindow("Capture Example");
+}
+
 void *logThread(void *in)
 {
     while(!threadEnd)
@@ -227,7 +281,7 @@ void *calcThread(void *in)
             avg /= fps.size();
             // printf("Jitter: %lf\n", jitterSum);
             jitterSum /= jitter.size();
-            printf("\rAverage FPS for %d frames: %lf         Jitter: %lf                  ", MATHFRAMES, avg, jitterSum);
+            printf("\rAverage FPS for %d frames: %lf         Jitter: %lf frames             ", MATHFRAMES, avg, jitterSum);
             fflush(stdout);
         }
         pthread_mutex_unlock(&lock1); 
@@ -266,9 +320,11 @@ int main( int argc, char** argv )
     cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_HEIGHT, VRES);
 
     printf("\n");
-    pthread_create(&thread, NULL, houghThread, NULL);
+    
+    pthread_create(&thread, NULL, houghEllipThread, NULL);
     pthread_create(&thread1, NULL, calcThread, NULL);
     pthread_create(&thread2, NULL, logThread, NULL);
+
     pthread_join(thread, NULL);
     pthread_join(thread1, NULL);
     pthread_join(thread2, NULL);
