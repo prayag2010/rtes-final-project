@@ -60,6 +60,9 @@ pthread_mutex_t lock;
 pthread_mutex_t lock1; 
 bool newVal = false;
 
+long circleSize = 0;
+
+int transfromSel = 0;
 
 void CannyThreshold(int, void*)
 {
@@ -179,7 +182,8 @@ void *houghEllipThread(void *in)
 
         HoughCircles(gray, circles, CV_HOUGH_GRADIENT, 1, gray.rows/8, 100, 50, 0, 0);
 
-        printf("circles.size = %ld\n", circles.size());
+        // printf("circles.size = %ld\n", circles.size());
+        circleSize = circles.size();
 
         for( size_t i = 0; i < circles.size(); i++ )
         {
@@ -281,7 +285,11 @@ void *calcThread(void *in)
             avg /= fps.size();
             // printf("Jitter: %lf\n", jitterSum);
             jitterSum /= jitter.size();
-            printf("\rAverage FPS for %d frames: %lf         Jitter: %lf frames             ", MATHFRAMES, avg, jitterSum);
+
+            if(transfromSel != 2)
+                printf("\rAverage FPS for %d frames: %lf         Jitter: %lf              ", MATHFRAMES, avg, jitterSum);
+            else
+                printf("\rAverage FPS for %d frames: %lf    Jitter: %lf    circles.size(): %lu  ", MATHFRAMES, avg, jitterSum, circleSize);
             fflush(stdout);
         }
         pthread_mutex_unlock(&lock1); 
@@ -292,36 +300,112 @@ void *calcThread(void *in)
 
 int main( int argc, char** argv )
 {
+    int xSize = 640;
+    int ySize = 480;
+
     int dev=0;
     pthread_t thread, thread1, thread2;
     pthread_mutex_init(&lock, NULL);
     pthread_mutex_init(&lock1, NULL);
 
-    if(argc > 1)
+    if (argc == 1)
     {
-        sscanf(argv[1], "%d", &dev);
-        printf("using %s\n", argv[1]);
+        printf("\nUsing default: Hough transform, X Res %d, Y res %d\n", xSize, ySize);
     }
-    else if(argc == 1)
-        printf("using default\n");
+    else if (argc == 2)
+    {
+        sscanf(argv[1], "%d", &transfromSel);
+        printf("\nUsing transformation: ");
+        if(transfromSel == 0)
+        {
+            printf("Canny\n");
+        }
+        else if(transfromSel == 1)
+        {
+            printf("Hough\n");
+        }
+        else if(transfromSel == 2)
+        {
+            printf("Hough Elliptical\n");
+        }
+        else
+        {
+            printf("\nINVALID TRANSFORM SELECTED, CHOOSE 0 - 2\n");
+            exit(-1);
+        }
+    }
+    else if (argc == 4)
+    {
+        sscanf(argv[1], "%d", &transfromSel);
+        printf("\nUsing transformation: ");
+        if(transfromSel == 0)
+        {
+            printf("Canny\n");
+        }
+        else if(transfromSel == 1)
+        {
+            printf("Hough\n");
+        }
+        else if(transfromSel == 2)
+        {
+            printf("Hough Elliptical\n");
+        }
+        else
+        {
+            printf("\nINVALID TRANSFORM SELECTED, CHOOSE 0 - 2\n");
+            exit(-1);
+        }
 
+        sscanf(argv[2], "%d", &xSize);
+        sscanf(argv[3], "%d", &ySize);
+
+        printf("Using resolution: X:%d Y:%d\n", xSize, ySize);
+    }
     else
     {
-        printf("usage: capture [dev]\n");
+        printf("\nInvalid number of arguments, usage:\n");
+        printf("[TRANSFORMATION] [X-RES] [Y-RES]\n");
+        printf("[TRANSFORMATION]:\n");
+        printf("0: Canny\n1: Hough\n2: Hough Elliptical\n");
         exit(-1);
     }
+
+    // if(argc > 1)
+    // {
+    //     sscanf(argv[1], "%d", &dev);
+    //     printf("using %s\n", argv[1]);
+    // }
+    // else if(argc == 1)
+    //     printf("using default\n");
+
+    // else
+    // {
+    //     printf("usage: capture [dev]\n");
+    //     exit(-1);
+    // }
 
     namedWindow( timg_window_name, CV_WINDOW_AUTOSIZE );
     // Create a Trackbar for user to enter threshold
     createTrackbar( "Min Threshold:", timg_window_name, &lowThreshold, max_lowThreshold, CannyThreshold );
 
     capture = (CvCapture *)cvCreateCameraCapture(dev);
-    cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_WIDTH, HRES);
-    cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_HEIGHT, VRES);
+    cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_WIDTH, xSize);
+    cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_HEIGHT, ySize);
 
     printf("\n");
-    
-    pthread_create(&thread, NULL, houghEllipThread, NULL);
+
+    if(transfromSel == 0)
+        pthread_create(&thread, NULL, cannyTransform, NULL);
+    else if(transfromSel == 1)
+        pthread_create(&thread, NULL, houghThread, NULL);
+    else if(transfromSel == 2)
+        pthread_create(&thread, NULL, houghEllipThread, NULL);
+    else
+    {
+        printf("Invalid transformation select, exiting\n");
+        exit(-1);
+    }
+
     pthread_create(&thread1, NULL, calcThread, NULL);
     pthread_create(&thread2, NULL, logThread, NULL);
 
