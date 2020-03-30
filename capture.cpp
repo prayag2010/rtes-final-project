@@ -45,7 +45,17 @@ IplImage* frame;
 time_t startTime, endTime;
 CvCapture* capture;
 
+struct execTime{
+    struct timespec t1;
+    struct timespec t2;
+};
+
 vector<double> fps;
+
+static struct execTime exec;
+pthread_mutex_t lock; 
+pthread_mutex_t lock1; 
+bool newVal = false;
 
 
 void CannyThreshold(int, void*)
@@ -67,12 +77,11 @@ void CannyThreshold(int, void*)
     mat_frame.copyTo( timg_grad, canny_frame);
 
     imshow( timg_window_name, timg_grad );
-
 }
 
-void *cannyTransform(void* in)
+void *cannyTransform(void *in)
 {
-    time(&startTime);
+    // time(&startTime);
     // for(int i = 0; i < NUMFRAMES; i++)
     while(1)
     {
@@ -91,12 +100,59 @@ void *cannyTransform(void* in)
             break;
         }
         clock_gettime(CLOCK_REALTIME, &end);
-        double time_spent = (end.tv_sec - start.tv_sec) +
-						(end.tv_nsec - start.tv_nsec) / BILLION;
+
+        pthread_mutex_lock(&lock); 
+        exec.t1 = end;
+        exec.t2 = start;
+        newVal = true;
+        pthread_mutex_unlock(&lock); 
+        
+        // double time_spent = (end.tv_sec - start.tv_sec) +
+		// 				(end.tv_nsec - start.tv_nsec) / BILLION;
+
+        // double inverse = (double)1.00 / time_spent;
+        // // printf("From func: %lf\n", inverse);
+
+        // if(fps.size() < MATHFRAMES)
+        //     fps.push_back(inverse);
+        // else
+        // {
+        //     fps.erase(fps.begin());
+        //     fps.push_back(inverse);
+        // }
+    }
+    threadEnd = true;
+    // time(&endTime);
+    // break;
+}
+
+void *logThread(void *in)
+{
+    while(!threadEnd)
+    {
+        struct timespec tempEnd;
+        struct timespec tempStart;
+        pthread_mutex_lock(&lock);
+        if(newVal)
+        {
+            newVal = false;
+            tempEnd = exec.t1;
+            tempStart = exec.t2;
+        }
+        else
+        {
+            pthread_mutex_unlock(&lock);
+            continue;
+        }
+        pthread_mutex_unlock(&lock);
+
+        double time_spent = (tempEnd.tv_sec - tempStart.tv_sec) +
+						    (tempEnd.tv_nsec - tempStart.tv_nsec) / BILLION;
 
         double inverse = (double)1.00 / time_spent;
         // printf("From func: %lf\n", inverse);
 
+        // pthread_mutex_lock(&lock1); 
         if(fps.size() < MATHFRAMES)
             fps.push_back(inverse);
         else
@@ -104,18 +160,17 @@ void *cannyTransform(void* in)
             fps.erase(fps.begin());
             fps.push_back(inverse);
         }
+        // pthread_mutex_lock(&lock1); 
     }
-    threadEnd = true;
-    time(&endTime);
-    // break;
 }
 
-void *calcThread(void* in)
+void *calcThread(void *in)
 {
     while(!threadEnd)
     {
         vector<double> jitter;
         printf("\rAverage fps for the last %d frames: ", MATHFRAMES);
+        pthread_mutex_lock(&lock1); 
         if(fps.size() < MATHFRAMES)
         {
             printf("Waiting to reach %d frames", MATHFRAMES);
@@ -146,6 +201,7 @@ void *calcThread(void* in)
             printf("\rAverage FPS for %d frames: %lf         Jitter: %lf                  ", MATHFRAMES, avg, jitterSum);
             fflush(stdout);
         }
+        pthread_mutex_unlock(&lock1); 
     }
     printf("\n");
 }
@@ -154,7 +210,9 @@ void *calcThread(void* in)
 int main( int argc, char** argv )
 {
     int dev=0;
-    pthread_t thread, thread1;
+    pthread_t thread, thread1, thread2;
+    pthread_mutex_init(&lock, NULL);
+    pthread_mutex_init(&lock1, NULL);
 
     if(argc > 1)
     {
@@ -184,8 +242,10 @@ int main( int argc, char** argv )
     printf("\n");
     pthread_create(&thread, NULL, cannyTransform, NULL);
     pthread_create(&thread1, NULL, calcThread, NULL);
+    pthread_create(&thread2, NULL, logThread, NULL);
     pthread_join(thread, NULL);
     pthread_join(thread1, NULL);
+    pthread_join(thread2, NULL);
     // }
 
     // Time elapsed
