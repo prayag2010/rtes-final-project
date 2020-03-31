@@ -1,10 +1,6 @@
-/*
- *
- *  Example by Sam Siewert 
- *
- *  Updated 10/29/16 for OpenCV 3.1
- *
- */
+// Code written by Prayag Desai for RTES exercise 4
+// Based on code written by Sam Siewert
+
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,6 +59,20 @@ bool newVal = false;
 long circleSize = 0;
 
 int transfromSel = 0;
+
+//15.45 fps
+//0.0647
+double cannyDeadline = 0.075;
+
+//9 fps
+//0.11
+double houghDeadline = 0.2;
+
+//14 fps
+//0.0714
+double houghEllipDeadline = 0.085;
+
+int deadlineCrossed = 0;
 
 void CannyThreshold(int, void*)
 {
@@ -286,10 +296,41 @@ void *calcThread(void *in)
             // printf("Jitter: %lf\n", jitterSum);
             jitterSum /= jitter.size();
 
+            double temp = (double)1.00 / avg;
+            double jitFPS = 0;
+            
+            if(transfromSel == 0)
+            {
+                jitFPS = (double)1.00 / cannyDeadline;
+                if(temp > cannyDeadline)
+                {
+                    deadlineCrossed++;
+                }
+            }
+            else if(transfromSel == 1)
+            {
+                jitFPS = (double)1.00 / houghDeadline;
+                if(temp > houghDeadline)
+                {
+                    deadlineCrossed++;
+                }
+            }
+            else if(transfromSel == 2)
+            {
+                jitFPS = (double)1.00 / houghEllipDeadline;
+                if(temp > houghEllipDeadline)
+                {
+                    deadlineCrossed++;
+                }
+            }
+
+            double tempJit = abs(jitFPS - avg);
+
             if(transfromSel != 2)
-                printf("\rAverage FPS for %d frames: %lf         Jitter: %lf              ", MATHFRAMES, avg, jitterSum);
+                printf("\rAverage FPS frames: %0.2lf  Jitter: %0.2lf  Rel Jitter: %0.2lf  Deadline cross: %d", avg, jitterSum, tempJit, deadlineCrossed);
             else
-                printf("\rAverage FPS for %d frames: %lf    Jitter: %lf    circles.size(): %lu  ", MATHFRAMES, avg, jitterSum, circleSize);
+                printf("\rAverage FPS frames: %0.2lf Jitter: %0.2lf circles(): %lu  Rel Jitter: %0.2lf  Deadline cross: %d", avg, jitterSum, circleSize, tempJit, deadlineCrossed);
+            
             fflush(stdout);
         }
         pthread_mutex_unlock(&lock1); 
@@ -310,7 +351,7 @@ int main( int argc, char** argv )
 
     if (argc == 1)
     {
-        printf("\nUsing default: Hough transform, X Res %d, Y res %d\n", xSize, ySize);
+        printf("\nUsing default: Canny transform, X Res %d, Y res %d\n", xSize, ySize);
     }
     else if (argc == 2)
     {
@@ -370,19 +411,10 @@ int main( int argc, char** argv )
         exit(-1);
     }
 
-    // if(argc > 1)
-    // {
-    //     sscanf(argv[1], "%d", &dev);
-    //     printf("using %s\n", argv[1]);
-    // }
-    // else if(argc == 1)
-    //     printf("using default\n");
+    printf("Deadlines chosen:\nCanny: %0.2lf sec\nHough: %0.2lf sec\nElliptical Hough: %0.2lf sec\n\n", cannyDeadline, \
+    houghDeadline, houghEllipDeadline);
 
-    // else
-    // {
-    //     printf("usage: capture [dev]\n");
-    //     exit(-1);
-    // }
+    printf("Calculating in real time for %d frames.\n\n", MATHFRAMES);
 
     namedWindow( timg_window_name, CV_WINDOW_AUTOSIZE );
     // Create a Trackbar for user to enter threshold
