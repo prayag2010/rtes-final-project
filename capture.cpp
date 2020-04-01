@@ -338,18 +338,61 @@ void *calcThread(void *in)
     printf("\n");
 }
 
+void print_scheduler(void)
+{
+   int schedType;
 
+   schedType = sched_getscheduler(getpid());
+
+   switch(schedType)
+   {
+     case SCHED_FIFO:
+           printf("Pthread Policy is SCHED_FIFO\n");
+           break;
+     case SCHED_OTHER:
+           printf("Pthread Policy is SCHED_OTHER\n");
+       break;
+     case SCHED_RR:
+           printf("Pthread Policy is SCHED_OTHER\n");
+           break;
+     default:
+       printf("Pthread Policy is UNKNOWN\n");
+   }
+}
 int main( int argc, char** argv )
 {
     int xSize = 640;
     int ySize = 480;
-
+    struct sched_param main_param;
+    int rc=sched_getparam(getpid(), &main_param);
+    main_param.sched_priority=sched_get_priority_max(SCHED_FIFO);
+    rc=sched_setscheduler(getpid(), SCHED_FIFO, &main_param);
+    print_scheduler();
     int dev=0;
     pthread_t thread, thread1, thread2;
+    pthread_attr_t thr, thr1,thr2;
+    int thr_pr = sched_get_priority_max(SCHED_FIFO) - 1;
+    struct sched_param txP;
+    struct sched_param txP1;
+    struct sched_param txP2;
     pthread_mutex_init(&lock, NULL);
     pthread_mutex_init(&lock1, NULL);
-
-    if (argc == 1)
+    pthread_attr_init (&thr);
+    pthread_attr_init (&thr1);
+    pthread_attr_init (&thr2);
+    pthread_attr_getschedparam (&thr, &txP);
+    pthread_attr_getschedparam (&thr1, &txP1);
+    pthread_attr_getschedparam (&thr2, &txP2);
+    txP.sched_priority = thr_pr;
+    txP1.sched_priority = thr_pr;
+    txP2.sched_priority = thr_pr;
+    pthread_attr_setschedparam (&thr, &txP);
+    pthread_attr_setschedparam (&thr1, &txP1);
+    pthread_attr_setschedparam (&thr2, &txP2);
+    pthread_attr_setschedpolicy(&thr, SCHED_FIFO);
+    pthread_attr_setschedpolicy(&thr1, SCHED_FIFO);
+    pthread_attr_setschedpolicy(&thr1, SCHED_FIFO);   
+  if (argc == 1)
     {
         printf("\nUsing default: Canny transform, X Res %d, Y res %d\n", xSize, ySize);
     }
