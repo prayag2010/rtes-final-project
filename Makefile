@@ -3,7 +3,8 @@ LIB_DIRS =
 CC=g++
 
 CDEFS=
-CFLAGS= -O0 -pg -g $(INCLUDE_DIRS) $(CDEFS) -I/home/prayag/opencv-3.4.4/modules.core/include
+CFLAGS= -O0 -pg -g $(INCLUDE_DIRS) $(CDEFS) -I/home/prayag/opencv-3.4.4/modules.core/include -I/home/prayag/opencv-4.3.0/modules/core/include \
+	-I/home/prayag/opencv-4.3.0/build/opencv2 -I/home/prayag/opencv-4.3.0/include
 LIBS= -lrt -pthread
 CPPLIBS= -L/usr/lib -lopencv_core -lopencv_flann -lopencv_video -L/usr/local/lib/ -lopencv_core -lopencv_imgproc -lopencv_highgui
 
