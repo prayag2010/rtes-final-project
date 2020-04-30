@@ -32,7 +32,7 @@
 #include <sys/time.h>
 #include <errno.h>
 #define PORTNO 9000
-#define DISTANCECHECK 8100
+#define DISTANCECHECK 2500
 using namespace cv;
 
 using namespace std;
@@ -56,6 +56,9 @@ Rect bounding_rect, boundRect;
 float radius;
 Point2f center;
 Mat drawing;
+
+unsigned long long seqCnt = 0;
+unsigned long long avg = 0;
 
 RNG rng(12345);
 #define USEC_PER_MSEC (1000)
@@ -113,11 +116,11 @@ void acquireFrame(void) {
   // wait for a new frame from camera and store it into 'frame'
   cap.read(frame);
   // check if we succeeded
-  if (frame.empty()) {
-    cerr << "ERROR! blank frame grabbed\n";
-  }
+//   if (frame.empty()) {
+//     cerr << "ERROR! blank frame grabbed\n";
+//   }
   // show live and wait for a key with timeout long enough to show images
-  waitKey(5);
+  waitKey(1);
 }
 
 void applyBlur(void) { GaussianBlur(frame, blurFrame, Size(11, 11), 0, 0); }
@@ -126,9 +129,9 @@ void applyMask(void) {
   cvtColor(blurFrame, fullImageHSV, CV_BGR2HSV);
   inRange(fullImageHSV, Scalar(36, 25, 25), Scalar(70, 255, 255),
           frame_threshold);
+//   erode(frame_threshold, frame_threshold, 0);
   erode(frame_threshold, frame_threshold, 0);
-  erode(frame_threshold, frame_threshold, 0);
-  dilate(frame_threshold, frame_threshold, 0);
+//   dilate(frame_threshold, frame_threshold, 0);
   dilate(frame_threshold, frame_threshold, 0);
 }
 
@@ -148,14 +151,16 @@ void acqLargestContours(void) {
     if (area > largest_area) {
       largest_area = area;
       largest_contour_index = i; // Store the index of largest contour
-      bounding_rect = boundingRect(
-          contours[i]); // Find the bounding rectangle for biggest contour
+    //   bounding_rect = boundingRect(
+    //       contours[i]); // Find the bounding rectangle for biggest contour
       approxPolyDP(contours[largest_contour_index], contours_poly, 3, true);
-      boundRect = boundingRect(contours_poly);
+    //   boundRect = boundingRect(contours_poly);
       minEnclosingCircle(contours_poly, center, radius);
     }
   }
-}
+  
+  }
+
 
 void drawOverlay(void) {
   // drawing = Mat::zeros( frame_threshold.size(), CV_8UC3 );
@@ -205,8 +210,8 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  cap.set(CV_CAP_PROP_FRAME_WIDTH, 320);
-  cap.set(CV_CAP_PROP_FRAME_HEIGHT, 240);
+  cap.set(CV_CAP_PROP_FRAME_WIDTH, 640);
+  cap.set(CV_CAP_PROP_FRAME_HEIGHT, 480);
   cpu_set_t threadcpu;
   int i, rc, scope;
   pthread_t threads[MAX_THREADS];
@@ -351,15 +356,14 @@ int main(int argc, char *argv[]) {
 }
 
 void *Sequencer(void *args) {
-  struct timeval current_time_val;
+   struct timeval start, end, difference,current_time_val;
   struct timespec delay_time = {0, 1000000}; // delay for 1 msec,
-  struct timespec remaining_time;
+  struct timespec remaining_time;static int wcet;
   double current_time;
   double residual;
   int rc, delay_cnt = 0;
-  unsigned long long seqCnt = 0;
 
-  gettimeofday(&current_time_val, (struct timezone *)0);
+  gettimeofday(&start, (struct timezone *)0);
 
   do {
     delay_cnt = 0;
@@ -377,9 +381,9 @@ void *Sequencer(void *args) {
                  (int)remaining_time.tv_sec, (int)remaining_time.tv_nsec);
 
         delay_cnt++;
-      }
+      
 
-    } while ((residual > 0.0) && (delay_cnt < 100));
+    } }while ((residual > 0.0) && (delay_cnt < 100));
 
     seqCnt++;
     gettimeofday(&current_time_val, (struct timezone *)0);
@@ -389,7 +393,7 @@ void *Sequencer(void *args) {
 
     // Release each service at a sub-rate of the generic sequencer rate
 
-    if ((seqCnt % 40) == 0)
+    if ((seqCnt % 80) == 0)
       sem_post(&sem[IMAGE_ACQ]);
 
     if ((seqCnt % 100) == 0)
@@ -403,22 +407,37 @@ void *Sequencer(void *args) {
 
     if (seqCnt > 60000)
       break;
+    gettimeofday(&end, (struct timezone *)0);
+    difference.tv_sec = end.tv_sec - current_time_val.tv_sec;
+   difference.tv_usec = end.tv_usec - current_time_val.tv_usec;
+   int timediff1 = 100000 * (difference.tv_sec) + (difference.tv_usec );
+   if(wcet < timediff1){
+       wcet=timediff1;
+   syslog(LOG_DEBUG,"Sequencer wcet for %d usec",wcet);
+   }
   } while (completed[sequencer]);
 
   completed[sequencer] = 0;
+  gettimeofday(&end, (struct timezone *)0);
+  difference.tv_sec = end.tv_sec - start.tv_sec;
+  difference.tv_usec = end.tv_usec - start.tv_usec;
+  int timediff = 1000 * (difference.tv_sec) + (difference.tv_usec / 1000);
+  syslog(LOG_DEBUG,"Sequencer total execution for %d msec",timediff);
   sem_post(&sem[IMAGE_ACQ]);
- 
+
+  
   sem_post(&sem[LOCATION_CHECKER]);
   sem_post(&sem[USER_INPUT]);
   sem_post(&sem[GENERATE_RECTANGLE]);
 
   pthread_exit((void *)0);
 }
-unsigned long ex = 0;
-void *imageacq(void *args) {
-  int times = 0;
+  unsigned long ex = 0;
+  void *imageacq(void *args) {
+  unsigned long times = 0;
   struct timeval start, end, difference;
   static int wcet;
+  int dropped;
   while (completed[sequencer] == 1) {
     sem_wait(&sem[IMAGE_ACQ]);
     gettimeofday(&start, (struct timezone *)0);
@@ -433,6 +452,17 @@ void *imageacq(void *args) {
     sprintf(scorestr, "Current score is %d", score);
     putText(frame, scorestr, Point(10, 30), FONT_HERSHEY_TRIPLEX, 1,
             Scalar(200, 100, 34), 1);
+     gettimeofday(&end, (struct timezone *)0);
+     difference.tv_sec = end.tv_sec - start.tv_sec;
+     difference.tv_usec = end.tv_usec - start.tv_usec;
+     
+     if(difference.tv_usec/1000 > 70)
+     {   
+         syslog(LOG_DEBUG,"Dropped frames %d\n",++dropped);
+         continue;
+     }
+    
+     //gettimeofday(&start, (struct timezone *)0);
     imshow("Live", frame);
     gettimeofday(&end, (struct timezone *)0);
     // wcet_measure[MAX_THREADS-1];
@@ -440,17 +470,27 @@ void *imageacq(void *args) {
     difference.tv_usec = end.tv_usec - start.tv_usec;
     int timediff = 1000 * (difference.tv_sec) + (difference.tv_usec / 1000);
     
-    if(timediff > 40)
+    if(timediff > 80)
     {
         ex++;
         syslog(LOG_DEBUG,"CROSSED:%lu\n", ex);
     }
 
-    if (timediff > wcet) {
+    if (timediff > wcet) 
+    {
       wcet = timediff;
       syslog(LOG_DEBUG,"WCET IMAGE ACQ:%d\n", wcet);
     }
+
+    if(seqCnt < 60000)
+    {
+        avg += timediff;
+        times++;
+    }
   }
+  float ms = (float)avg/(float)times;
+  syslog(LOG_DEBUG,"Average: %llu------%f-FPS-----------%ld times\n", (unsigned long long)ms, (float)(times/60),times);
+  syslog(LOG_DEBUG,"CROSSED:%lu--------------------------------\n", ex);
   
 }
 
@@ -468,13 +508,12 @@ void *generatebound(void *args) {
     // wcet_measure[MAX_THREADS-1];
     difference.tv_sec = end.tv_sec - start.tv_sec;
     difference.tv_usec = end.tv_usec - start.tv_usec;
-    int timediff = 1000 * (difference.tv_sec) + (difference.tv_usec / 1000);
+    int timediff =  difference.tv_usec ;
     if (timediff > wcet) {
       wcet = timediff;
-      syslog(LOG_DEBUG,"Boundary generation WCET:%d\n", wcet);
+      syslog(LOG_DEBUG,"Boundary generation WCET:%d usec\n", wcet);
     }
   }
-  
 }
 
 void *checker(void *args) {
@@ -491,14 +530,21 @@ void *checker(void *args) {
     if (distance < DISTANCECHECK) {
       score++;
     }
+    else{
+    if(contours.size() == 0){
+    printf("Object not detected\n");
+    exit(0);
+    }
+    }
     gettimeofday(&end, (struct timezone *)0);
     // wcet_measure[MAX_THREADS-1];
     difference.tv_sec = end.tv_sec - start.tv_sec;
     difference.tv_usec = end.tv_usec - start.tv_usec;
-    int timediff = 1000 * (difference.tv_sec) + (difference.tv_usec / 1000);
+    int timediff = 1000000 * (difference.tv_sec) + (difference.tv_usec);
     if (timediff > wcet) {
       wcet = timediff;
-      syslog(LOG_DEBUG,"CHECKER %d\n",wcet);
+      syslog(LOG_DEBUG,"CHECKER wcet %d usec\n",wcet);
+      
     }
   }
   
@@ -511,8 +557,9 @@ void *fetchinput(void *args) {
     sem_wait(&sem[USER_INPUT]);
     gettimeofday(&start, (struct timezone *)0);
     char ch[2] = {0};
-    printf("Enter cmd\n");
-    cin >> ch;
+    //printf("Enter cmd\n");
+    //cin >> ch;
+    ch[0]='q';
     write(socket_client, &ch, 1);
     gettimeofday(&end, (struct timezone *)0);
     // wcet_measure[MAX_THREADS-1];
