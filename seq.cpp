@@ -1,16 +1,11 @@
-#include <opencv2/opencv.hpp>
-#include "opencv2/imgproc.hpp"
-#include "opencv2/imgcodecs.hpp"
-#include "opencv2/highgui.hpp"
-#include <iostream>
-#include <sys/time.h>
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <pthread.h>
 #include <sched.h>
-#include "thread_details.h"
 #include <time.h>
 #include <string.h>
 #include <semaphore.h>
@@ -18,28 +13,17 @@
 #include <syslog.h>
 #include <sys/time.h>
 #include <errno.h>
+#include "thread_details.h"
+#include <opencv2/opencv.hpp>
+#include "opencv2/imgproc.hpp"
+#include "opencv2/imgcodecs.hpp"
+#include "opencv2/highgui.hpp"
+#include <iostream>
+
+
 using namespace cv;
-
 using namespace std;
-pthread_mutex_t image_access;
-Mat frame, blurFrame;
-    //--- INITIALIZE VIDEOCAPTURE
-VideoCapture cap;
-Mat fullImageHSV;
-Mat frame_threshold;
-int ran_x,ran_y;
-vector<vector<Point>> contours;
-vector<Vec4i> hierarchy;
 
-vector<Point> contours_poly;
-int largest_area=0;
-int largest_contour_index=0;
-Rect bounding_rect, boundRect;
-float radius;
-Point2f center;
-Mat drawing;
-
-RNG rng(12345);
 #define USEC_PER_MSEC (1000)
 #define NANOSEC_PER_SEC (1000000000)
 #define TRUE (1)
@@ -79,111 +63,10 @@ void print_scheduler(void)
    }
 }
 
-int getMaxAreaContourId(vector <vector<cv::Point>> contours) {
-    double maxArea = 0;
-    int maxAreaContourId = -1;
-    for (int j = 0; j < contours.size(); j++) {
-        double newArea = cv::contourArea(contours.at(j));
-        if (newArea > maxArea) {
-            maxArea = newArea;
-            maxAreaContourId = j;
-        } // End if
-    } // End for
-    return maxAreaContourId;
-} // End function
 
-void acquireFrame(void)
+int main(void)
 {
-// wait for a new frame from camera and store it into 'frame'
-    cap.read(frame);
-    // check if we succeeded
-    if (frame.empty()) {
-        cerr << "ERROR! blank frame grabbed\n";
-    }
-    // show live and wait for a key with timeout long enough to show images
-    waitKey(5);
-}
-
-void applyBlur(void)
-{
-    GaussianBlur( frame, blurFrame, Size( 11, 11 ), 0, 0 );
-}
-
-void applyMask(void)
-{
-    cvtColor(blurFrame, fullImageHSV, CV_BGR2HSV);
-    inRange(fullImageHSV, Scalar(36, 25, 25), Scalar(70, 255, 255), frame_threshold);
-
-    erode(frame_threshold, frame_threshold, 0);
-    erode(frame_threshold, frame_threshold, 0);
-    dilate(frame_threshold, frame_threshold, 0);
-    dilate(frame_threshold, frame_threshold, 0);
-
-}
-
-
-void acqLargestContours(void)
-{
-    //was  CV_RETR_TREE
-    
-    
-    findContours( frame_threshold, contours, hierarchy, RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE, Point(0, 0) );
-
-    largest_area=0;
-    largest_contour_index=0;
-    
-
-    for( size_t i = 0; i< contours.size(); i++ ) // iterate through each contour.
-    {
-        double area = contourArea( contours[i] );  //  Find the area of contour
-
-        if( area > largest_area )
-        {
-            largest_area = area;
-            largest_contour_index = i;               //Store the index of largest contour
-            bounding_rect = boundingRect( contours[i] ); // Find the bounding rectangle for biggest contour
-            approxPolyDP( contours[largest_contour_index], contours_poly, 3, true );
-            boundRect = boundingRect( contours_poly );
-            minEnclosingCircle( contours_poly, center, radius );
-        }
-    }
-    printf("Centre of circle %f %f\n", center.x,center.y);
-
-}
-
-void drawOverlay(void)
-{
-    // drawing = Mat::zeros( frame_threshold.size(), CV_8UC3 );
-    // Scalar color = Scalar( rng.uniform(0, 256), rng.uniform(0,256), rng.uniform(0,256) );
-    // rectangle( frame, boundRect.tl(), boundRect.br(), Scalar( 0, 255, 0 ), 2 );
-    circle( frame, center, (int)radius, Scalar( 0, 255, 0 ), 2 );
-    // drawContours( drawing, contours,largest_contour_index, Scalar( 0, 255, 0 ), 2 ); // Draw the largest contour using previously stored index.
-}
-
-
-int main(int, char**)
-{
-    srand (time(NULL));
-    // open the default camera using default API
-    cap.open(0);
-    // OR advance usage: select any API backend
-    int deviceID = 0;             // 0 = open default camera
-    int apiID = cv::CAP_ANY;      // 0 = autodetect default API
-    // open selected camera using selected API
-    cap.open(deviceID + apiID);
-    // check if we succeeded
-    if (!cap.isOpened()) {
-        cerr << "ERROR! Unable to open camera\n";
-        return -1;
-    }
-    if (pthread_mutex_init(&image_access, NULL) != 0)
-    {
-        printf("\n mutex init failed\n");
-        return 1;
-    }
-    cap.set(CV_CAP_PROP_FRAME_WIDTH,640);
-    cap.set(CV_CAP_PROP_FRAME_HEIGHT,480);
-    cpu_set_t threadcpu;
+	cpu_set_t threadcpu;
 	int  i,rc, scope;
     pthread_t threads[MAX_THREADS];
     pthread_attr_t rt_sched_attr[MAX_THREADS];
@@ -263,7 +146,7 @@ int main(int, char**)
         printf("pthread_create successful for service 1\n");
 
 
-    rt_param[IMAGE_DRAW].sched_priority=rt_max_prio-2;
+    rt_param[IMAGE_DRAW].sched_priority=rt_max_prio-1;
     pthread_attr_setschedparam(&rt_sched_attr[IMAGE_DRAW], &rt_param[IMAGE_DRAW]);
     rc=pthread_create(&threads[IMAGE_DRAW], &rt_sched_attr[IMAGE_DRAW], imagedraw, NULL);
     if(rc < 0)
@@ -304,10 +187,10 @@ int main(int, char**)
     else
         printf("pthread_create successful for sequeencer service 0\n");
 
-    while(1){
+    while(1)
+    {
         ;
     }
-    // the camera will be deinitialized automatically in VideoCapture destructor
     return 0;
 }
 
@@ -347,7 +230,11 @@ void *Sequencer(void *args)
  
                 delay_cnt++;
             }
-           
+            else if(rc < 0)
+            {
+                perror("Sequencer nanosleep");
+                exit(-1);
+            }
            
         } while((residual > 0.0) && (delay_cnt < 100));
 
@@ -365,21 +252,22 @@ void *Sequencer(void *args)
         if((seqCnt % 40) == 0) sem_post(&sem[IMAGE_ACQ]);
 
         
-        if((seqCnt % 50) == 0) sem_post(&sem[IMAGE_DRAW]);
+        if((seqCnt % 40) == 0) sem_post(&sem[IMAGE_DRAW]);
 
-        if((seqCnt % 60) == 0) sem_post(&sem[LOCATION_CHECKER]);
+        if((seqCnt % 50) == 0) sem_post(&sem[LOCATION_CHECKER]);
 
         
         if((seqCnt % 1000) == 0) sem_post(&sem[USER_INPUT]);
 
         
-        if((seqCnt % 10000) == 0) sem_post(&sem[GENERATE_RECTANGLE]);
+        if((seqCnt % 2000) == 0) sem_post(&sem[GENERATE_RECTANGLE]);
 
         //gettimeofday(&current_time_val, (struct timezone *)0);
         //syslog(LOG_CRIT, "Sequencer release all sub-services @ sec=%d, msec=%d\n", (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
         //gettimeofday(&wcet_end,(struct timezone *)0);
+
         //syslog(LOG_CRIT, "Sequencer WCET sec=%d, usec=%d\n", (int)(wcet_end.tv_sec-wcet_start.tv_sec), (int) ((wcet_end.tv_usec - wcet_start.tv_usec)));
-    } while(completed[sequencer]);
+    } while(completed[sequencer] );
     completed[sequencer]=0;
     sem_post(&sem[IMAGE_ACQ]); sem_post(&sem[IMAGE_DRAW]); sem_post(&sem[LOCATION_CHECKER]);
     sem_post(&sem[USER_INPUT]); sem_post(&sem[GENERATE_RECTANGLE]); 
@@ -393,13 +281,8 @@ int times=0;
 while(completed[sequencer] ==1)
     {   
         sem_wait(&sem[IMAGE_ACQ]);
-        pthread_mutex_lock(&image_access);
-        acquireFrame();
-        applyBlur();
-        applyMask();
-        acqLargestContours();
-        pthread_mutex_unlock(&image_access);
-        //printf("Image acquire thread %d\n",times);
+        
+        printf("Image acquire thread %d\n",times);
     }
        
 
@@ -410,14 +293,9 @@ void *imagedraw(void *args)
     while(completed[sequencer] ==1)
     {   
         sem_wait(&sem[IMAGE_DRAW]);
-        pthread_mutex_lock(&image_access);
-        //times++;
-        //printf("Image draw thread %d\n",times);
-        drawOverlay();
-       // circle(frame, Point(ran_x, ran_y), 50, Scalar(255, 255, 255), 0, 8, 0);
-       circle(frame, Point(320, 240), 50, Scalar(255, 255, 255), 0, 8, 0);
-        imshow("Live", frame);
-        pthread_mutex_unlock(&image_access);
+        times++;
+         printf("Image draw thread %d\n",times);
+
 
     }
    
@@ -428,13 +306,10 @@ void *generatebound(void *args){
         int times=0;
     while(completed[sequencer] ==1)
     {   
+        
         sem_wait(&sem[GENERATE_RECTANGLE]);
         times++;
-        //circle(frame,Point(100,100),20,Scalar(100,100,100),1,7);
-        // circle( frame, Point( 200, 200 ), 32.0, Scalar( 0, 0, 255 ), 1, 8 );
-        //ran_x=rand() % 400 +50;
-        //ran_y= rand() % 250 + 20;
-        printf("Generate bound %d\n",times);
+        printf("Genereate bound %d\n",times);
     }
     
 
@@ -444,9 +319,10 @@ void *checker(void *args)
 {   int times;
     while(completed[sequencer] == 1)
     {   
+        
         sem_wait(&sem[LOCATION_CHECKER]);
         times++;
-       // printf(" Checking thread %d\n",times);
+        printf(" Checking thread %d\n",times);
 
     }
     
@@ -461,11 +337,20 @@ void *fetchinput(void *args){
         sem_wait(&sem[USER_INPUT]);
         times++;
       
-      //  printf("USER_INPUT thread %d \n",times);
+        printf("USER_INPUT thread %d \n",times);
     }
       
 
 }
 }
 
+
+
+
+
+
+
+
+
+   
 
