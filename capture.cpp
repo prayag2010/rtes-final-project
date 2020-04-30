@@ -18,12 +18,14 @@
 #include <syslog.h>
 #include <sys/time.h>
 #include <errno.h>
+#define DISTANCECHECK 8100
 using namespace cv;
 
 using namespace std;
 pthread_mutex_t image_access;
 Mat frame, blurFrame;
-    //--- INITIALIZE VIDEOCAPTURE
+int score;
+//--- INITIALIZE VIDEOCAPTURE
 VideoCapture cap;
 Mat fullImageHSV;
 Mat frame_threshold;
@@ -264,13 +266,13 @@ int main(int, char**)
         printf("pthread_create successful for service 1\n");
 
 
-    rt_param[IMAGE_DRAW].sched_priority=rt_max_prio-2;
-    pthread_attr_setschedparam(&rt_sched_attr[IMAGE_DRAW], &rt_param[IMAGE_DRAW]);
-    rc=pthread_create(&threads[IMAGE_DRAW], &rt_sched_attr[IMAGE_DRAW], imagedraw, NULL);
-    if(rc < 0)
-        perror("pthread_create for service 2");
-    else
-        printf("pthread_create successful for service 2\n");
+    // rt_param[IMAGE_DRAW].sched_priority=rt_max_prio-2;
+    // pthread_attr_setschedparam(&rt_sched_attr[IMAGE_DRAW], &rt_param[IMAGE_DRAW]);
+    // rc=pthread_create(&threads[IMAGE_DRAW], &rt_sched_attr[IMAGE_DRAW], imagedraw, NULL);
+    // if(rc < 0)
+    //     perror("pthread_create for service 2");
+    // else
+    //     printf("pthread_create successful for service 2\n");
 
     rt_param[LOCATION_CHECKER].sched_priority=rt_max_prio-2;
     pthread_attr_setschedparam(&rt_sched_attr[LOCATION_CHECKER], &rt_param[LOCATION_CHECKER]);
@@ -365,22 +367,15 @@ void *Sequencer(void *args)
         
         if((seqCnt % 40) == 0) sem_post(&sem[IMAGE_ACQ]);
 
-        
-        if((seqCnt % 50) == 0) sem_post(&sem[IMAGE_DRAW]);
-
         if((seqCnt % 100) == 0) sem_post(&sem[LOCATION_CHECKER]);
-
         
         if((seqCnt % 1000) == 0) sem_post(&sem[USER_INPUT]);
-
         
         if((seqCnt % 10000) == 0) sem_post(&sem[GENERATE_RECTANGLE]);
 
-        //gettimeofday(&current_time_val, (struct timezone *)0);
-        //syslog(LOG_CRIT, "Sequencer release all sub-services @ sec=%d, msec=%d\n", (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
-        //gettimeofday(&wcet_end,(struct timezone *)0);
-        //syslog(LOG_CRIT, "Sequencer WCET sec=%d, usec=%d\n", (int)(wcet_end.tv_sec-wcet_start.tv_sec), (int) ((wcet_end.tv_usec - wcet_start.tv_usec)));
+        
     } while(completed[sequencer]);
+    
     completed[sequencer]=0;
     sem_post(&sem[IMAGE_ACQ]); sem_post(&sem[IMAGE_DRAW]); sem_post(&sem[LOCATION_CHECKER]);
     sem_post(&sem[USER_INPUT]); sem_post(&sem[GENERATE_RECTANGLE]); 
@@ -394,81 +389,62 @@ int times=0;
 while(completed[sequencer] ==1)
     {   
         sem_wait(&sem[IMAGE_ACQ]);
-        pthread_mutex_lock(&image_access);
         acquireFrame();
         applyBlur();
         applyMask();
         acqLargestContours();
-        pthread_mutex_unlock(&image_access);
         completed[IMAGE_ACQ]= 1;
-        //printf("Image acquire thread %d\n",times);
+        drawOverlay();
+        circle(frame, Point(ran_x, ran_y), 50, Scalar(255, 255, 255), 0, 8, 0);
+        char scorestr[50];
+        sprintf(scorestr,"Current score is %d",score);
+        putText(frame,scorestr,Point(10,30),FONT_HERSHEY_TRIPLEX,1,Scalar(200,100,34),1);
+        imshow("Live", frame);
+        
     }
        
 
 }
 
-void *imagedraw(void *args)
-{ int times=0;
-    while(completed[sequencer] ==1)
-    {   if(completed[IMAGE_ACQ] == 1)
-    {   completed[IMAGE_ACQ]=0;
-        sem_wait(&sem[IMAGE_DRAW]);
-        pthread_mutex_lock(&image_access);
-        //times++;
-        printf("Image draw thread %d\n",times);
-        drawOverlay();
-        circle(frame, Point(ran_x, ran_y), 50, Scalar(255, 255, 255), 0, 8, 0);
-        //circle(frame, Point(320, 240), 50, Scalar(255, 255, 255), 0, 8, 0);
-        imshow("Live", frame);
-        pthread_mutex_unlock(&image_access);
-    }
-
-    }
-   
-}
 
 void *generatebound(void *args){
-    {
-        int times=0;
+{
+    int times=0;
+    
     while(completed[sequencer] ==1)
     {   
         sem_wait(&sem[GENERATE_RECTANGLE]);
         times++;
-        //circle(frame,Point(100,100),20,Scalar(100,100,100),1,7);
-        // circle( frame, Point( 200, 200 ), 32.0, Scalar( 0, 0, 255 ), 1, 8 );
         ran_x=rand() % 400 +50;
         ran_y= rand() % 250 + 20;
         printf("Generate bound %d\n",times);
     }
-    
-
 }
 }
 void *checker(void *args)
-{   int times;
+{   
+    int times;
     while(completed[sequencer] == 1)
     {   
         sem_wait(&sem[LOCATION_CHECKER]);
         times++;
-       // printf(" Checking thread %d\n",times);
-
+        int distance = abs(pow(ran_x - (int)center.x,2)) + abs(pow(ran_y - (int)center.y,2));
+        
+        if (distance < DISTANCECHECK)
+        {
+        score++;
+        //printf("\nObject in boundary,score :%d\n",score);
+        }
     }
-    
-
 }
 
 void *fetchinput(void *args){
-    {
-        int times;
-    while(completed[sequencer] ==1)
-    {   
-        sem_wait(&sem[USER_INPUT]);
-        times++;
+            int times;
+        while(completed[sequencer] ==1)
+        {   
+            sem_wait(&sem[USER_INPUT]);
+            times++;  
+        }
       
-      //  printf("USER_INPUT thread %d \n",times);
-    }
-      
-
-}
 }
 
