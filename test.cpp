@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <math.h>
 #include <pthread.h>
 #include <sched.h>
 #include "thread_details.h"
@@ -18,6 +19,7 @@
 #include <syslog.h>
 #include <sys/time.h>
 #include <errno.h>
+#define DISTANCECHECK 8100
 using namespace cv;
 
 using namespace std;
@@ -27,7 +29,7 @@ Mat frame, blurFrame;
 VideoCapture cap;
 Mat fullImageHSV;
 Mat frame_threshold;
-int ran_x=320;
+int ran_x =320;
 int ran_y=240;
 vector<vector<Point>> contours;
 vector<Vec4i> hierarchy;
@@ -40,6 +42,7 @@ float radius;
 Point2f center;
 Mat drawing;
 
+int score;
 RNG rng(12345);
 #define USEC_PER_MSEC (1000)
 #define NANOSEC_PER_SEC (1000000000)
@@ -148,7 +151,7 @@ void acqLargestContours(void)
             minEnclosingCircle( contours_poly, center, radius );
         }
     }
-   
+    
 
 }
 
@@ -198,10 +201,10 @@ int main(int, char**)
     for(int x=0;x<MAX_THREADS;x++)
         completed[x]=1;
 
-   // CPU_ZERO(&allcpuset);
+    //CPU_ZERO(&allcpuset);
 
- //  for(int i=0; i < 1; i++)
-   //    CPU_SET(i, &allcpuset);
+//    for(int i=0; i < 1; i++)
+//        CPU_SET(i, &allcpuset);
     
     if (sem_init (&sem[sequencer], 0, 0)) { printf ("Failed to initialize S1 semaphore\n"); exit (-1); }
     if (sem_init (&sem[IMAGE_ACQ], 0, 0)) { printf ("Failed to initialize S2 semaphore\n"); exit (-1); }
@@ -210,7 +213,7 @@ int main(int, char**)
     if (sem_init (&sem[LOCATION_CHECKER], 0, 0)) { printf ("Failed to initialize S5 semaphore\n"); exit (-1); }
     if (sem_init (&sem[USER_INPUT], 0, 0)) { printf ("Failed to initialize S6 semaphore\n"); exit (-1); }
     
-    mainpid=getpid();
+     mainpid=getpid();
 
     rt_max_prio = sched_get_priority_max(SCHED_FIFO);
     rt_min_prio = sched_get_priority_min(SCHED_FIFO);
@@ -224,29 +227,26 @@ int main(int, char**)
     pthread_attr_getscope(&main_attr, &scope);
 
     if(scope == PTHREAD_SCOPE_SYSTEM)
-      printf("PTHREAD SCOPE SYSTEM\n");
-    else if (scope == PTHREAD_SCOPE_PROCESS)
-      printf("PTHREAD SCOPE PROCESS\n");
-    else
-      printf("PTHREAD SCOPE UNKNOWN\n");
+       printf("PTHREAD SCOPE SYSTEM\n");
+     else if (scope == PTHREAD_SCOPE_PROCESS)
+       printf("PTHREAD SCOPE PROCESS\n");
+     else
+       printf("PTHREAD SCOPE UNKNOWN\n");
 
-    printf("rt_max_prio=%d\n", rt_max_prio);
-    printf("rt_min_prio=%d\n", rt_min_prio);
+    // printf("rt_max_prio=%d\n", rt_max_prio);
+    // printf("rt_min_prio=%d\n", rt_min_prio);
 
     for(i=0; i < MAX_THREADS; i++)
     {
 
-     // CPU_ZERO(&threadcpu);
-     // CPU_SET(3, &threadcpu);
+       //CPU_ZERO(&threadcpu);
+        //CPU_SET(3, &threadcpu);
 
       rc=pthread_attr_init(&rt_sched_attr[i]);
       rc=pthread_attr_setinheritsched(&rt_sched_attr[i], PTHREAD_EXPLICIT_SCHED);
       rc=pthread_attr_setschedpolicy(&rt_sched_attr[i], SCHED_FIFO);
- 
-
       rt_param[i].sched_priority=rt_max_prio-i;
       pthread_attr_setschedparam(&rt_sched_attr[i], &rt_param[i]);
-
     }
 
     //Image tracker
@@ -368,7 +368,7 @@ void *Sequencer(void *args)
         
         if((seqCnt % 50) == 0) sem_post(&sem[IMAGE_DRAW]);
 
-        if((seqCnt % 100) == 0) sem_post(&sem[LOCATION_CHECKER]);
+        if((seqCnt % 60) == 0) sem_post(&sem[LOCATION_CHECKER]);
 
         
         if((seqCnt % 1000) == 0) sem_post(&sem[USER_INPUT]);
@@ -400,7 +400,6 @@ while(completed[sequencer] ==1)
         applyMask();
         acqLargestContours();
         pthread_mutex_unlock(&image_access);
-        completed[IMAGE_ACQ]= 1;
         //printf("Image acquire thread %d\n",times);
     }
        
@@ -410,18 +409,18 @@ while(completed[sequencer] ==1)
 void *imagedraw(void *args)
 { int times=0;
     while(completed[sequencer] ==1)
-    {   if(completed[IMAGE_ACQ] == 1)
-    {   completed[IMAGE_ACQ]=0;
+    {   
         sem_wait(&sem[IMAGE_DRAW]);
         pthread_mutex_lock(&image_access);
         //times++;
-        printf("Image draw thread %d\n",times);
+        //printf("Image draw thread %d\n",times);
         drawOverlay();
-        circle(frame, Point(ran_x, ran_y), 50, Scalar(255, 255, 255), 0, 8, 0);
-        //circle(frame, Point(320, 240), 50, Scalar(255, 255, 255), 0, 8, 0);
+        circle(frame, Point(ran_x, ran_y), 90, Scalar(25, 200, 255), 0, 8, 0);
+        char scorestr[50];
+        sprintf(scorestr,"Current score is %d",score);
+        putText(frame,scorestr,Point(10,30),FONT_HERSHEY_TRIPLEX,1,Scalar(200,100,34),1);
         imshow("Live", frame);
         pthread_mutex_unlock(&image_access);
-    }
 
     }
    
@@ -438,7 +437,7 @@ void *generatebound(void *args){
         // circle( frame, Point( 200, 200 ), 32.0, Scalar( 0, 0, 255 ), 1, 8 );
         ran_x=rand() % 400 +50;
         ran_y= rand() % 250 + 20;
-        printf("Generate bound %d\n",times);
+        //printf("Generate bound %d\n",times);
     }
     
 
@@ -450,7 +449,15 @@ void *checker(void *args)
     {   
         sem_wait(&sem[LOCATION_CHECKER]);
         times++;
-       // printf(" Checking thread %d\n",times);
+        
+        int distance = abs(pow(ran_x - (int)center.x,2)) + abs(pow(ran_y - (int)center.y,2));
+        if (distance < DISTANCECHECK){
+            score++;
+        printf("\nObject in boundary,score :%d\n",score);
+        }
+       
+       else 
+       printf(" Checking thread %d\n",times);
 
     }
     
@@ -471,4 +478,5 @@ void *fetchinput(void *args){
 
 }
 }
+
 
