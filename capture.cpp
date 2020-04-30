@@ -205,8 +205,8 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  cap.set(CV_CAP_PROP_FRAME_WIDTH, 640);
-  cap.set(CV_CAP_PROP_FRAME_HEIGHT, 480);
+  cap.set(CV_CAP_PROP_FRAME_WIDTH, 320);
+  cap.set(CV_CAP_PROP_FRAME_HEIGHT, 240);
   cpu_set_t threadcpu;
   int i, rc, scope;
   pthread_t threads[MAX_THREADS];
@@ -407,14 +407,14 @@ void *Sequencer(void *args) {
 
   completed[sequencer] = 0;
   sem_post(&sem[IMAGE_ACQ]);
-  sem_post(&sem[IMAGE_DRAW]);
+ 
   sem_post(&sem[LOCATION_CHECKER]);
   sem_post(&sem[USER_INPUT]);
   sem_post(&sem[GENERATE_RECTANGLE]);
 
   pthread_exit((void *)0);
 }
-
+unsigned long ex = 0;
 void *imageacq(void *args) {
   int times = 0;
   struct timeval start, end, difference;
@@ -439,11 +439,19 @@ void *imageacq(void *args) {
     difference.tv_sec = end.tv_sec - start.tv_sec;
     difference.tv_usec = end.tv_usec - start.tv_usec;
     int timediff = 1000 * (difference.tv_sec) + (difference.tv_usec / 1000);
+    
+    if(timediff > 40)
+    {
+        ex++;
+        syslog(LOG_DEBUG,"CROSSED:%lu\n", ex);
+    }
+
     if (timediff > wcet) {
       wcet = timediff;
+      syslog(LOG_DEBUG,"WCET IMAGE ACQ:%d\n", wcet);
     }
   }
-  printf("WCET IMAGE ACQ:%d\n", wcet);
+  
 }
 
 void *generatebound(void *args) {
@@ -463,9 +471,10 @@ void *generatebound(void *args) {
     int timediff = 1000 * (difference.tv_sec) + (difference.tv_usec / 1000);
     if (timediff > wcet) {
       wcet = timediff;
+      syslog(LOG_DEBUG,"Boundary generation WCET:%d\n", wcet);
     }
   }
-  printf("Boundary generation WCET:%d\n", wcet);
+  
 }
 
 void *checker(void *args) {
@@ -489,9 +498,10 @@ void *checker(void *args) {
     int timediff = 1000 * (difference.tv_sec) + (difference.tv_usec / 1000);
     if (timediff > wcet) {
       wcet = timediff;
+      syslog(LOG_DEBUG,"CHECKER %d\n",wcet);
     }
   }
-  printf("Checker:%d\n", wcet);
+  
 }
 
 void *fetchinput(void *args) {
@@ -511,7 +521,8 @@ void *fetchinput(void *args) {
     int timediff = 1000 * (difference.tv_sec) + (difference.tv_usec / 1000);
     if (timediff > wcet) {
       wcet = timediff;
+      syslog(LOG_DEBUG,"USER ip : %d",wcet);
     }
   }
-  printf("WCET USER IP :%d\n", wcet);
+
 }
