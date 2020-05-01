@@ -488,8 +488,8 @@ void *Sequencer(void *args) {
         times++;
     }
   }
-  float ms = (float)avg/(float)times;
-  syslog(LOG_DEBUG,"Average: %llu------%f-FPS-----------%ld times\n", (unsigned long long)ms, (float)(times/60),times);
+ // float ms = (float)avg/(float)times;
+  syslog(LOG_DEBUG,"%f-FPS-----------%ld times\n", (float)(times/60),times);
   syslog(LOG_DEBUG,"CROSSED:%lu--------------------------------\n", ex);
   
 }
@@ -557,18 +557,18 @@ void *fetchinput(void *args) {
     sem_wait(&sem[USER_INPUT]);
     gettimeofday(&start, (struct timezone *)0);
     char ch[2] = {0};
-    //printf("Enter cmd\n");
-    //cin >> ch;
-    ch[0]='q';
+    printf("Enter command\n");
+    cin >> ch;
+  //  ch[0]='q';
     write(socket_client, &ch, 1);
     gettimeofday(&end, (struct timezone *)0);
     // wcet_measure[MAX_THREADS-1];
     difference.tv_sec = end.tv_sec - start.tv_sec;
     difference.tv_usec = end.tv_usec - start.tv_usec;
-    int timediff = 1000 * (difference.tv_sec) + (difference.tv_usec / 1000);
+    int timediff = 1000000 * (difference.tv_sec) + (difference.tv_usec);
     if (timediff > wcet) {
       wcet = timediff;
-      syslog(LOG_DEBUG,"USER ip : %d",wcet);
+      syslog(LOG_DEBUG,"USER ip : %d usec\n",wcet);
     }
   }
 
