@@ -36,6 +36,7 @@
 using namespace cv;
 
 using namespace std;
+// Setting up Global variables - for Image processing
 pthread_mutex_t image_access;
 Mat frame, blurFrame;
 int score;
@@ -66,12 +67,13 @@ RNG rng(12345);
 #define TRUE (1)
 #define FALSE (0)
 
+//variables to control thread execution
 sem_t sem[MAX_THREADS];
 bool completed[MAX_THREADS];
 int sequencer_on = 1;
+
 void *Sequencer(void *args);
 void *imageacq(void *args);
-
 void *generatebound(void *args);
 void *checker(void *args);
 void *fetchinput(void *args);
@@ -99,6 +101,7 @@ void print_scheduler(void) {
   }
 }
 
+//Max contour detection
 int getMaxAreaContourId(vector<vector<cv::Point>> contours) {
   double maxArea = 0;
   int maxAreaContourId = -1;
@@ -173,6 +176,7 @@ void drawOverlay(void) {
 }
 
 int main(int argc, char *argv[]) {
+  //setting up random number generator
   srand(time(NULL));
   // open the default camera using default API
   cap.open(0);
@@ -184,7 +188,7 @@ int main(int argc, char *argv[]) {
   if (socket_client < 0)
     perror("Socket setup");
 
-  // Socket parameters
+  // Socket parameters - Adapted from self written code here : https://github.com/cu-ecen-5013/final-project-sharanaru/blob/master/client.c
   struct sockaddr_in server_details;
   socklen_t addr_size;
   socket_client = socket(AF_INET, SOCK_STREAM, 0);
@@ -222,15 +226,16 @@ int main(int argc, char *argv[]) {
   pthread_attr_t main_attr;
   pid_t mainpid;
   cpu_set_t allcpuset;
-
+//booleamn to switch all threads to operate
   for (int x = 0; x < MAX_THREADS; x++)
     completed[x] = 1;
-
+//Affinity setup
   CPU_ZERO(&allcpuset);
 
   for (int i = 0; i < 1; i++)
     CPU_SET(i, &allcpuset);
 
+//Semaphores used to control rate of acquisition
   if (sem_init(&sem[sequencer], 0, 0)) {
     printf("Failed to initialize S1 semaphore\n");
     exit(-1);
@@ -257,7 +262,7 @@ int main(int argc, char *argv[]) {
   }
 
   mainpid = getpid();
-
+// setting up priority of threads 
   rt_max_prio = sched_get_priority_max(SCHED_FIFO);
   rt_min_prio = sched_get_priority_min(SCHED_FIFO);
 
@@ -352,9 +357,9 @@ int main(int argc, char *argv[]) {
     ;
   }
 
-  return 0;
 }
 
+// Sequencer tries to run at execution 
 void *Sequencer(void *args) {
    struct timeval start, end, difference,current_time_val;
   struct timespec delay_time = {0, 1000000}; // delay for 1 msec,
@@ -364,7 +369,7 @@ void *Sequencer(void *args) {
   int rc, delay_cnt = 0;
 
   gettimeofday(&start, (struct timezone *)0);
-
+  syslog(LOG_DEBUG,"Sequencer started at %d sec %d msec\n", start.tv_sec,start.tv_usec/1000);
   do {
     delay_cnt = 0;
     residual = 0.0;
@@ -392,19 +397,19 @@ void *Sequencer(void *args) {
       printf("Sequencer looping delay %d\n", delay_cnt);
 
     // Release each service at a sub-rate of the generic sequencer rate
-
+	//Image acquistion and processing runs every 80 ms
     if ((seqCnt % 80) == 0)
       sem_post(&sem[IMAGE_ACQ]);
-
+	//location and score is updated every 100 ms
     if ((seqCnt % 100) == 0)
       sem_post(&sem[LOCATION_CHECKER]);
-
+	//user input is fetched every 3 seconds
     if ((seqCnt % 3000) == 0)
       sem_post(&sem[USER_INPUT]);
-
+	// new rectangels is generated every 10 seconds
     if ((seqCnt % 10000) == 0)
       sem_post(&sem[GENERATE_RECTANGLE]);
-
+	// breaks after one minute of execution - for capturing debug data
     if (seqCnt > 60000)
       break;
     gettimeofday(&end, (struct timezone *)0);
@@ -429,11 +434,12 @@ void *Sequencer(void *args) {
   sem_post(&sem[LOCATION_CHECKER]);
   sem_post(&sem[USER_INPUT]);
   sem_post(&sem[GENERATE_RECTANGLE]);
-
+syslog(LOG_DEBUG,"Sequencer ended at %d sec %d msec\n", end.tv_sec,end.tv_usec/1000);
   pthread_exit((void *)0);
 }
   unsigned long ex = 0;
-  void *imageacq(void *args) {
+  
+ void *imageacq(void *args) {
   unsigned long times = 0;
   struct timeval start, end, difference;
   static int wcet;
@@ -441,6 +447,7 @@ void *Sequencer(void *args) {
   while (completed[sequencer] == 1) {
     sem_wait(&sem[IMAGE_ACQ]);
     gettimeofday(&start, (struct timezone *)0);
+	syslog(LOG_DEBUG,"IMAGE acq started at %d sec %d msec\n", start.tv_sec,start.tv_usec/1000);
     acquireFrame();
     applyBlur();
     applyMask();
@@ -487,11 +494,13 @@ void *Sequencer(void *args) {
         avg += timediff;
         times++;
     }
+	
   }
  // float ms = (float)avg/(float)times;
   syslog(LOG_DEBUG,"%f-FPS-----------%ld times\n", (float)(times/60),times);
   syslog(LOG_DEBUG,"CROSSED:%lu--------------------------------\n", ex);
-  
+  syslog(LOG_DEBUG,"IMAGE_ACQ ended at %d sec %d msec\n", end.tv_sec,end.tv_usec/1000);
+  return NULL;
 }
 
 void *generatebound(void *args) {
@@ -501,11 +510,13 @@ void *generatebound(void *args) {
   while (completed[sequencer] == 1) {
     sem_wait(&sem[GENERATE_RECTANGLE]);
     gettimeofday(&start, (struct timezone *)0);
+	syslog(LOG_DEBUG,"New region generation started at %d sec %d msec\n", start.tv_sec,start.tv_usec/1000);
     times++;
     ran_x = rand() % 400 + 50;
     ran_y = rand() % 250 + 20;
     gettimeofday(&end, (struct timezone *)0);
     // wcet_measure[MAX_THREADS-1];
+	
     difference.tv_sec = end.tv_sec - start.tv_sec;
     difference.tv_usec = end.tv_usec - start.tv_usec;
     int timediff =  difference.tv_usec ;
@@ -514,6 +525,8 @@ void *generatebound(void *args) {
       syslog(LOG_DEBUG,"Boundary generation WCET:%d usec\n", wcet);
     }
   }
+  syslog(LOG_DEBUG,"New region generation ended at %d sec %d msec\n", end.tv_sec,end.tv_usec/1000);
+  return NULL;
 }
 
 void *checker(void *args) {
@@ -523,6 +536,7 @@ void *checker(void *args) {
   while (completed[sequencer] == 1) {
     sem_wait(&sem[LOCATION_CHECKER]);
     gettimeofday(&start, (struct timezone *)0);
+	syslog(LOG_DEBUG,"Score check started at %d sec %d msec\n", start.tv_sec,start.tv_usec/1000);
     times++;
     int distance =
         abs(pow(ran_x - (int)center.x, 2)) + abs(pow(ran_y - (int)center.y, 2));
@@ -533,11 +547,12 @@ void *checker(void *args) {
     else{
     if(contours.size() == 0){
     printf("Object not detected\n");
-    exit(0);
+//    exit(0);
     }
     }
     gettimeofday(&end, (struct timezone *)0);
     // wcet_measure[MAX_THREADS-1];
+	
     difference.tv_sec = end.tv_sec - start.tv_sec;
     difference.tv_usec = end.tv_usec - start.tv_usec;
     int timediff = 1000000 * (difference.tv_sec) + (difference.tv_usec);
@@ -547,7 +562,8 @@ void *checker(void *args) {
       
     }
   }
-  
+  syslog(LOG_DEBUG,"Score check ended at %d sec %d msec\n", end.tv_sec,end.tv_usec/1000);
+  return NULL;
 }
 
 void *fetchinput(void *args) {
@@ -556,6 +572,7 @@ void *fetchinput(void *args) {
   while (completed[sequencer] == 1) {
     sem_wait(&sem[USER_INPUT]);
     gettimeofday(&start, (struct timezone *)0);
+	syslog(LOG_DEBUG,"User input started at %d sec %d msec\n", start.tv_sec,start.tv_usec/1000);
     char ch[2] = {0};
     printf("Enter command\n");
     cin >> ch;
@@ -563,6 +580,7 @@ void *fetchinput(void *args) {
     write(socket_client, &ch, 1);
     gettimeofday(&end, (struct timezone *)0);
     // wcet_measure[MAX_THREADS-1];
+	
     difference.tv_sec = end.tv_sec - start.tv_sec;
     difference.tv_usec = end.tv_usec - start.tv_usec;
     int timediff = 1000000 * (difference.tv_sec) + (difference.tv_usec);
@@ -570,6 +588,8 @@ void *fetchinput(void *args) {
       wcet = timediff;
       syslog(LOG_DEBUG,"USER ip : %d usec\n",wcet);
     }
+	
   }
-
+	syslog(LOG_DEBUG,"User input ended at %d sec %d msec\n", end.tv_sec,end.tv_usec/1000);
+	return NULL;
 }
